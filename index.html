@@ -211,7 +211,7 @@
             </div>
             <div class="lg:col-span-5 flex flex-col gap-6">
                 <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 hover:shadow-md transition-all flex-1">
-                    <h3 class="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2"><i class="fa-solid fa-medal text-indigo-500"></i> อันดับคนที่มียอดสะสมเยอะที่สุด 10 อันดับ</h3>
+                    <h3 class="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2"><i class="fa-solid fa-medal text-indigo-500"></i> อันดับค่าเฉลี่ยผลงานต่อวันเยอะที่สุด 10 อันดับ</h3>
                     <div class="h-52 relative">
                         <canvas id="tempTopVolumeChart"></canvas>
                     </div>
@@ -609,12 +609,68 @@
             return null;
         }
 
+        // ฟังก์ชันคำนวณยอดเฉลี่ยต่อวันของพนักงาน (ยอดรวม / จำนวนวันที่มาทำงานที่มียอด > 0)
+        function calcAvgDaily(item) {
+            let activeDays = 0;
+            let totalVol = item.totalMonthly || 0;
+            if (item.daily) {
+                Object.values(item.daily).forEach(v => {
+                    if (v > 0) activeDays++;
+                });
+            }
+            return activeDays > 0 ? totalVol / activeDays : 0;
+        }
+
+        // ฟังก์ชันช่วยหาข้อมูลและอันดับเฉลี่ยต่อวันของเดือนก่อนหน้า
+        function getPrevMonthRankAndScore(currentYear, currentMonth, fullName, metricType) {
+            let cYear = parseInt(currentYear, 10);
+            let cMonth = parseInt(currentMonth, 10);
+            cMonth -= 1;
+            if (cMonth < 1) {
+                cMonth = 12;
+                cYear -= 1;
+            }
+            const prevMonthKey = `${cYear}/${cMonth < 10 ? '0' + cMonth : cMonth}`;
+            const rawTemp = apiResponseData.tempData || [];
+            
+            const prevData = rawTemp.filter(d => {
+                let mFormatted = d.month.length === 1 ? '0' + d.month : d.month;
+                return `${d.year}/${mFormatted}` === prevMonthKey || `${d.year}/${d.month}` === prevMonthKey;
+            });
+
+            if (!prevData || prevData.length === 0) return { rank: null };
+
+            if (metricType === 'volume') {
+                const sorted = [...prevData].map(item => ({
+                    ...item,
+                    avgDaily: calcAvgDaily(item)
+                })).sort((a, b) => b.avgDaily - a.avgDaily);
+                const index = sorted.findIndex(item => item.fullName === fullName);
+                return { rank: index !== -1 ? index + 1 : null };
+            } else {
+                const sortedErr = prevData.map(item => {
+                    let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
+                    return { ...item, totalErrors: errSum };
+                }).sort((a, b) => b.totalErrors - a.totalErrors);
+                const index = sortedErr.findIndex(item => item.fullName === fullName);
+                return { rank: index !== -1 ? index + 1 : null };
+            }
+        }
+
         // ================= Temp Mode Render =================
         function updateTempKPIs() {
             const totalVol = filteredData.reduce((sum, item) => sum + (item.totalMonthly || 0), 0);
             const activeStaffCount = filteredData.length;
-            let topStaff = { fullName: '-', nickName: '-', totalMonthly: 0 };
-            if (filteredData.length > 0) topStaff = [...filteredData].sort((a, b) => (b.totalMonthly || 0) - (a.totalMonthly || 0))[0];
+            
+            // หา Top Performer จากค่าเฉลี่ยต่อวันสูงสุด
+            let topStaff = { fullName: '-', nickName: '-', avgDaily: 0, totalMonthly: 0 };
+            if (filteredData.length > 0) {
+                const staffWithAvg = filteredData.map(item => ({
+                    ...item,
+                    avgDaily: calcAvgDaily(item)
+                })).sort((a, b) => b.avgDaily - a.avgDaily);
+                topStaff = staffWithAvg[0];
+            }
 
             let topErrorStaff = { fullName: '-', nickName: '-', totalErrors: 0 };
             if (filteredData.length > 0) {
@@ -629,12 +685,65 @@
             filteredData.forEach(item => { currentDaysList.forEach(d => { if (item.daily && item.daily[d] > 0) totalActiveDays++; }); });
             const avgDailyPerStaff = totalActiveDays > 0 ? Math.round(totalVol / totalActiveDays) : 0;
 
+            // เทียบอันดับเฉลี่ยต่อวันกับเดือนก่อนหน้า (Top Performer)
+            const selectedMonthKey = document.getElementById('monthSelect').value;
+            let rankHtmlVol = '';
+            if (selectedMonthKey && topStaff.fullName !== '-') {
+                const [curYear, curMonth] = selectedMonthKey.split('/');
+                const allSortedVol = [...currentMonthData].map(item => ({
+                    ...item,
+                    avgDaily: calcAvgDaily(item)
+                })).sort((a, b) => b.avgDaily - a.avgDaily);
+                const currentRank = allSortedVol.findIndex(item => item.fullName === topStaff.fullName) + 1;
+                
+                const prev = getPrevMonthRankAndScore(curYear, curMonth, topStaff.fullName, 'volume');
+                if (prev.rank !== null) {
+                    if (currentRank < prev.rank) {
+                        rankHtmlVol = `<span class="text-emerald-600 font-semibold text-[11px] ml-1.5"><i class="fa-solid fa-arrow-trend-up"></i> (เดิมอันดับ ${prev.rank})</span>`;
+                    } else if (currentRank > prev.rank) {
+                        rankHtmlVol = `<span class="text-rose-600 font-semibold text-[11px] ml-1.5"><i class="fa-solid fa-arrow-trend-down"></i> (เดิมอันดับ ${prev.rank})</span>`;
+                    } else {
+                        rankHtmlVol = `<span class="text-slate-400 font-medium text-[11px] ml-1.5">(อันดับเดิม ${prev.rank})</span>`;
+                    }
+                } else {
+                    rankHtmlVol = `<span class="text-slate-400 font-normal text-[11px] ml-1.5">(เดือนก่อนไม่มีข้อมูล)</span>`;
+                }
+            }
+
+            // เทียบอันดับยอดผิดกับเดือนก่อนหน้า
+            let rankHtmlErr = '';
+            if (selectedMonthKey && topErrorStaff.fullName !== '-') {
+                const [curYear, curMonth] = selectedMonthKey.split('/');
+                const allSortedErr = currentMonthData.map(item => {
+                    let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
+                    return { ...item, totalErrors: errSum };
+                }).sort((a, b) => b.totalErrors - a.totalErrors);
+                const currentRankErr = allSortedErr.findIndex(item => item.fullName === topErrorStaff.fullName) + 1;
+
+                const prevErr = getPrevMonthRankAndScore(curYear, curMonth, topErrorStaff.fullName, 'error');
+                if (prevErr.rank !== null) {
+                    if (currentRankErr < prevErr.rank) {
+                        rankHtmlErr = `<span class="text-rose-600 font-semibold text-[11px] ml-1.5"><i class="fa-solid fa-arrow-trend-up"></i> (เดิมอันดับ ${prevErr.rank})</span>`;
+                    } else if (currentRankErr > prevErr.rank) {
+                        rankHtmlErr = `<span class="text-emerald-600 font-semibold text-[11px] ml-1.5"><i class="fa-solid fa-arrow-trend-down"></i> (เดิมอันดับ ${prevErr.rank})</span>`;
+                    } else {
+                        rankHtmlErr = `<span class="text-slate-400 font-medium text-[11px] ml-1.5">(อันดับเดิม ${prevErr.rank})</span>`;
+                    }
+                } else {
+                    rankHtmlErr = `<span class="text-slate-400 font-normal text-[11px] ml-1.5">(เดือนก่อนไม่มีข้อมูล)</span>`;
+                }
+            }
+
             document.getElementById('kpiTotalVolume').innerText = totalVol.toLocaleString();
             document.getElementById('kpiActiveStaff').innerText = activeStaffCount;
             document.getElementById('kpiDailyAvg').innerText = avgDailyPerStaff.toLocaleString();
-            document.getElementById('kpiTopPerformer').innerText = `${topStaff.fullName} (${topStaff.nickName})`;
-            document.getElementById('kpiTopScore').innerText = topStaff.totalMonthly ? topStaff.totalMonthly.toLocaleString() : '0';
-            document.getElementById('kpiTopErrorPerformer').innerText = `${topErrorStaff.fullName} (${topErrorStaff.nickName})`;
+            document.getElementById('kpiTopPerformer').innerHTML = `${topStaff.fullName} (${topStaff.nickName}) ${rankHtmlVol}`;
+            
+            // แสดงผลเป็นยอดเฉลี่ยต่อวันในการ์ด Top Performer
+            const avgDailyFormatted = topStaff.avgDaily ? topStaff.avgDaily.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 1}) : '0';
+            document.getElementById('kpiTopScore').innerHTML = `เฉลี่ยต่อวัน: <span class="font-bold">${avgDailyFormatted}</span>`;
+            
+            document.getElementById('kpiTopErrorPerformer').innerHTML = `${topErrorStaff.fullName} (${topErrorStaff.nickName}) ${rankHtmlErr}`;
             document.getElementById('kpiTopErrorScore').innerText = topErrorStaff.totalErrors ? topErrorStaff.totalErrors.toLocaleString() : '0';
         }
 
@@ -664,33 +773,81 @@
                 }
             });
 
-            const sortedVolRank = [...filteredData].sort((a, b) => (b.totalMonthly || 0) - (a.totalMonthly || 0)).slice(0, 10);
+            // จัดอันดับ Top 10 จาก "ค่าเฉลี่ยต่อวัน" สูงสุด พร้อมเทียบเดือนก่อนหน้า
+            const sortedVolRank = [...filteredData].map(item => ({
+                ...item,
+                avgDaily: calcAvgDaily(item)
+            })).sort((a, b) => b.avgDaily - a.avgDaily).slice(0, 10);
+
+            const selectedMonthKey = document.getElementById('monthSelect').value;
+            const [curYear, curMonth] = selectedMonthKey ? selectedMonthKey.split('/') : [2026, 11];
+
+            const volLabelsWithTrend = sortedVolRank.map(r => {
+                const nick = r.nickName || r.fullName;
+                const allSortedVol = [...currentMonthData].map(item => ({
+                    ...item,
+                    avgDaily: calcAvgDaily(item)
+                })).sort((a, b) => b.avgDaily - a.avgDaily);
+                const curRank = allSortedVol.findIndex(item => item.fullName === r.fullName) + 1;
+                const prev = getPrevMonthRankAndScore(curYear, curMonth, r.fullName, 'volume');
+                if (prev.rank !== null) {
+                    if (curRank < prev.rank) return `${nick} (↑เดิม ${prev.rank})`;
+                    else if (curRank > prev.rank) return `${nick} (↓เดิม ${prev.rank})`;
+                }
+                return nick;
+            });
+
             const ctxTopVol = document.getElementById('tempTopVolumeChart').getContext('2d');
             if (tempTopVolChartInstance) tempTopVolChartInstance.destroy();
             tempTopVolChartInstance = new Chart(ctxTopVol, {
                 type: 'bar',
                 data: {
-                    labels: sortedVolRank.map(r => r.nickName || r.fullName),
-                    datasets: [{ label: 'ยอดสะสม', data: sortedVolRank.map(r => r.totalMonthly || 0), backgroundColor: '#6366f1', borderRadius: 6 }]
+                    labels: volLabelsWithTrend,
+                    datasets: [{ label: 'เฉลี่ยผลงานต่อวัน', data: sortedVolRank.map(r => Number(r.avgDaily.toFixed(1))), backgroundColor: '#6366f1', borderRadius: 6 }]
                 },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ` เฉลี่ยต่อวัน: ${context.raw.toLocaleString()}`;
+                                }
+                            }
+                        }
+                    },
                     scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
                 }
             });
 
+            // จัดอันดับ Top 10 ยอดผิดสะสม (คงเดิมตามระบบ)
             const sortedErrorRank = filteredData.map(item => {
                 let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
                 return { ...item, totalErrors: errSum };
             }).sort((a, b) => b.totalErrors - a.totalErrors).slice(0, 10);
+
+            const errLabelsWithTrend = sortedErrorRank.map(r => {
+                const nick = r.nickName || r.fullName;
+                const allSortedErr = currentMonthData.map(item => {
+                    let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
+                    return { ...item, totalErrors: errSum };
+                }).sort((a, b) => b.totalErrors - a.totalErrors);
+                const curRankErr = allSortedErr.findIndex(item => item.fullName === r.fullName) + 1;
+                const prevErr = getPrevMonthRankAndScore(curYear, curMonth, r.fullName, 'error');
+                if (prevErr.rank !== null) {
+                    if (curRankErr < prevErr.rank) return `${nick} (↑เดิม ${prevErr.rank})`;
+                    else if (curRankErr > prevErr.rank) return `${nick} (↓เดิม ${prevErr.rank})`;
+                }
+                return nick;
+            });
 
             const ctxTopErr = document.getElementById('tempTopErrorChart').getContext('2d');
             if (tempTopErrChartInstance) tempTopErrChartInstance.destroy();
             tempTopErrChartInstance = new Chart(ctxTopErr, {
                 type: 'bar',
                 data: {
-                    labels: sortedErrorRank.map(r => r.nickName || r.fullName),
+                    labels: errLabelsWithTrend,
                     datasets: [{ label: 'ยอดผิดสะสม', data: sortedErrorRank.map(r => r.totalErrors || 0), backgroundColor: '#e11d48', borderRadius: 6 }]
                 },
                 options: {
