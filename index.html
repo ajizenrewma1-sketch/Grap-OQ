@@ -1102,15 +1102,15 @@
                 return parseInt(match[0], 10) <= maxDays;
             });
 
-            // 1. คำนวณยอดผิดไม่อนุโลมรายวัน ตามหัวข้อที่ถูกกรอง (filteredTopics)
+            // 1. เส้นสีเขียว: คำนวณยอดผิดไม่อนุโลมรายวัน ตามหัวข้อที่ถูกกรอง (filteredTopics)
             const dailyQcTotals = validDaysList.map(dayObj => {
                 const dayKey = dayObj.label !== undefined ? dayObj.label : dayObj;
                 return filteredTopics.reduce((sum, t) => sum + (t.daily[dayKey] || 0), 0);
             });
 
-            // 2. ดึงและคำนวณ "ยอดผิดรวมอนุโลมรายวัน" แยกตามหัวข้อที่ถูกกรอง (filteredTopics)
+            // 2. เส้นสีเหลือง: คำนวณตามหัวข้อที่ถูกกรอง (filteredTopics) เช่นกัน เพื่อให้สอดคล้องกับสิ่งที่ผู้ใช้เลือกใน Dropdown/Search
             const dailyTopicErrObj = getMatchingMonthObject(apiResponseData.allowanceDailyTopicErrors, selectedMonthKey);
-            
+
             const dailyAllowanceTotals = validDaysList.map(dayObj => {
                 const dayKey = dayObj.label !== undefined ? dayObj.label : dayObj;
                 const match = dayKey.toString().match(/\d+/);
@@ -1120,15 +1120,18 @@
                 const paddedDay = dayNum < 10 ? "0" + dayNum : String(dayNum);
                 const unpaddedDay = String(dayNum);
 
-                // รวมยอดของทุกหัวข้อที่อยู่ใน filteredTopics สำหรับวันนี้
-                let sumDayAllowance = 0;
+                let sumDayTotal = 0;
                 filteredTopics.forEach(t => {
+                    const nonAllowVal = t.daily[dayKey] || 0;
                     const apiErrDailyMap = getValByTopicPrefix(dailyTopicErrObj, t.topic) || {};
-                    const val = apiErrDailyMap[paddedDay] !== undefined ? apiErrDailyMap[paddedDay] : (apiErrDailyMap[unpaddedDay] || 0);
-                    sumDayAllowance += Number(val) || 0;
+                    const allowAllVal = apiErrDailyMap[paddedDay] !== undefined ? apiErrDailyMap[paddedDay] : (apiErrDailyMap[unpaddedDay] || 0);
+                    
+                    const diffVal = Math.max(0, allowAllVal - nonAllowVal);
+                    const totalValForTopic = nonAllowVal + diffVal;
+                    sumDayTotal += totalValForTopic;
                 });
 
-                return sumDayAllowance;
+                return sumDayTotal;
             });
 
             const ctxTrend = document.getElementById('dailyTrendChartQc').getContext('2d');
