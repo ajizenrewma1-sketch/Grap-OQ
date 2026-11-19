@@ -9,6 +9,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+   <!-- Chart.js DataLabels Plugin -->
+   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 
     <script>
         tailwind.config = { theme: { extend: { fontFamily: { sans: ['Prompt', 'Inter', 'sans-serif'] } } } }
@@ -56,6 +58,9 @@
                     <button onclick="switchSection('qc')" id="btnTabQc" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-300 flex items-center gap-2">
                         <i class="fa-solid fa-clipboard-check text-slate-400"></i> ยอดทีม QC
                     </button>
+		   <button onclick="switchSection('errors')" id="btnTabErrors" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-300 flex items-center gap-2">
+    <i class="fa-solid fa-chart-bar text-slate-400"></i> ยอดผิดและอนุมัติ
+		   </button>
                 </nav>
             </div>
 
@@ -249,6 +254,22 @@
             </div>
         </div>
 
+<!-- ===== CHARTS FOR ERRORS & APPROVALS MODE (ALL STAFF) ===== -->
+<div id="chartsContainerErrors" class="space-y-6 hidden">
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 hover:shadow-md transition-all">
+        <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center gap-2"><i class="fa-solid fa-medal text-indigo-500"></i> อันดับค่าเฉลี่ยผลงานต่อวัน (ทุกคน)</h3>
+        <div id="allVolChartWrapper" class="relative" style="height: 600px;">
+            <canvas id="allStaffVolumeChart"></canvas>
+        </div>
+    </div>
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 hover:shadow-md transition-all">
+        <h3 class="text-base font-bold text-slate-900 mb-4 flex items-center gap-2"><i class="fa-solid fa-user-xmark text-rose-500"></i> อันดับยอดผิดสะสมรายบุคคล (ทุกคน)</h3>
+        <div id="allErrChartWrapper" class="relative" style="height: 600px;">
+            <canvas id="allStaffErrorChart"></canvas>
+        </div>
+    </div>
+</div>
+
         <!-- 3. Matrix Table -->
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden transition-all hover:shadow-md">
             <div class="p-6 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 bg-slate-50/50">
@@ -323,64 +344,92 @@
         let qcTrendChartInstance = null;
         let qcReasonChartInstance = null;
         let qcTopicsChartInstance = null;
+	let allStaffVolChartInstance = null;
+	let allStaffErrorChartInstance = null;
 
         window.addEventListener('DOMContentLoaded', () => { fetchData(); });
 
         function switchSection(mode) {
-            currentMode = mode;
-            const btnTemp = document.getElementById('btnTabTemp');
-            const btnQc = document.getElementById('btnTabQc');
-            const subTitle = document.getElementById('subHeaderTitle');
+    currentMode = mode;
+    const btnTemp = document.getElementById('btnTabTemp');
+    const btnQc = document.getElementById('btnTabQc');
+    const btnErrors = document.getElementById('btnTabErrors'); // เพิ่มตัวแปรปุ่มใหม่
+    const subTitle = document.getElementById('subHeaderTitle');
 
-            const filterTempContainer = document.getElementById('filterTempContainer');
-            const filterQcContainer = document.getElementById('filterQcContainer');
-            const kpiTemp = document.getElementById('kpiContainerTemp');
-            const kpiQc = document.getElementById('kpiContainerQc');
-            const qcTableSwitcher = document.getElementById('qcTableModeSwitcher');
-            const tempColorLegend = document.getElementById('tempColorLegend'); // 1. เพิ่มการดึง Element คำอธิบายสี
+    const filterTempContainer = document.getElementById('filterTempContainer');
+    const filterQcContainer = document.getElementById('filterQcContainer');
+    const kpiTemp = document.getElementById('kpiContainerTemp');
+    const kpiQc = document.getElementById('kpiContainerQc');
+    const qcTableSwitcher = document.getElementById('qcTableModeSwitcher');
+    const tempColorLegend = document.getElementById('tempColorLegend');
+    const matrixTableCard = document.querySelector('.bg-white.rounded-2xl.shadow-sm.border.border-slate-200\\/80.overflow-hidden');
 
-            const chartsTemp = document.getElementById('chartsContainerTemp');
-            const chartsQc = document.getElementById('chartsContainerQc');
+    const chartsTemp = document.getElementById('chartsContainerTemp');
+    const chartsQc = document.getElementById('chartsContainerQc');
+    const chartsErrors = document.getElementById('chartsContainerErrors'); // เพิ่มตัวแปร Container กราฟใหม่
 
-            if (mode === 'temp') {
-                btnTemp.className = "px-4 py-2 rounded-xl text-xs font-semibold bg-white text-indigo-600 shadow-sm transition-all duration-300 flex items-center gap-2";
-                btnTemp.querySelector('i').className = "fa-solid fa-users-gear text-indigo-500";
-                
-                btnQc.className = "px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-300 flex items-center gap-2";
-                btnQc.querySelector('i').className = "fa-solid fa-clipboard-check text-slate-400";
-                
-                subTitle.innerText = "ระบบติดตามและตรวจสอบยอดส่วนต่าง (ยอดน้อง Temp)";
-                
-                filterTempContainer.classList.remove('hidden');
-                filterQcContainer.classList.add('hidden');
-                kpiTemp.classList.remove('hidden');
-                kpiQc.classList.add('hidden');
-                qcTableSwitcher.classList.add('hidden');
-                tempColorLegend.classList.remove('hidden'); // 2. แสดงคำอธิบายสีเมื่ออยู่หน้า Temp
+    // รีเซ็ตสไตล์ปุ่มทั้งหมด
+    const inactiveClass = "px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-300 flex items-center gap-2";
+    btnTemp.className = inactiveClass;
+    btnTemp.querySelector('i').className = "fa-solid fa-users-gear text-slate-400";
+    btnQc.className = inactiveClass;
+    btnQc.querySelector('i').className = "fa-solid fa-clipboard-check text-slate-400";
+    if(btnErrors) {
+        btnErrors.className = inactiveClass;
+        btnErrors.querySelector('i').className = "fa-solid fa-chart-bar text-slate-400";
+    }
 
-                chartsTemp.classList.remove('hidden');
-                chartsQc.classList.add('hidden');
-            } else {
-                btnQc.className = "px-4 py-2 rounded-xl text-xs font-semibold bg-white text-teal-700 shadow-sm transition-all duration-300 flex items-center gap-2";
-                btnQc.querySelector('i').className = "fa-solid fa-clipboard-check text-teal-600";
-                
-                btnTemp.className = "px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 transition-all duration-300 flex items-center gap-2";
-                btnTemp.querySelector('i').className = "fa-solid fa-users-gear text-slate-400";
-                
-                subTitle.innerText = "ระบบติดตามและตรวจสอบผลการตรวจสอบสุทธิ (ยอดทีม QC)";
-                
-                filterTempContainer.classList.add('hidden');
-                filterQcContainer.classList.remove('hidden');
-                kpiTemp.classList.add('hidden');
-                kpiQc.classList.remove('hidden');
-                qcTableSwitcher.classList.remove('hidden');
-                tempColorLegend.classList.add('hidden'); // 3. ซ่อนคำอธิบายสีเมื่ออยู่หน้า QC
+    if (mode === 'temp') {
+        btnTemp.className = "px-4 py-2 rounded-xl text-xs font-semibold bg-white text-indigo-600 shadow-sm transition-all duration-300 flex items-center gap-2";
+        btnTemp.querySelector('i').className = "fa-solid fa-users-gear text-indigo-500";
+        subTitle.innerText = "ระบบติดตามและตรวจสอบยอดส่วนต่าง (ยอดน้อง Temp)";
+        
+        filterTempContainer.classList.remove('hidden');
+        filterQcContainer.classList.add('hidden');
+        kpiTemp.classList.remove('hidden');
+        kpiQc.classList.add('hidden');
+        qcTableSwitcher.classList.add('hidden');
+        tempColorLegend.classList.remove('hidden');
+        if(matrixTableCard) matrixTableCard.classList.remove('hidden');
 
-                chartsTemp.classList.add('hidden');
-                chartsQc.classList.remove('hidden');
-            }
-            handleMonthChange();
-        }
+        chartsTemp.classList.remove('hidden');
+        chartsQc.classList.add('hidden');
+        chartsErrors.classList.add('hidden');
+    } else if (mode === 'qc') {
+        btnQc.className = "px-4 py-2 rounded-xl text-xs font-semibold bg-white text-teal-700 shadow-sm transition-all duration-300 flex items-center gap-2";
+        btnQc.querySelector('i').className = "fa-solid fa-clipboard-check text-teal-600";
+        subTitle.innerText = "ระบบติดตามและตรวจสอบผลการตรวจสอบสุทธิ (ยอดทีม QC)";
+        
+        filterTempContainer.classList.add('hidden');
+        filterQcContainer.classList.remove('hidden');
+        kpiTemp.classList.add('hidden');
+        kpiQc.classList.remove('hidden');
+        qcTableSwitcher.classList.remove('hidden');
+        tempColorLegend.classList.add('hidden');
+        if(matrixTableCard) matrixTableCard.classList.remove('hidden');
+
+        chartsTemp.classList.add('hidden');
+        chartsQc.classList.remove('hidden');
+        chartsErrors.classList.add('hidden');
+    } else if (mode === 'errors') {
+        btnErrors.className = "px-4 py-2 rounded-xl text-xs font-semibold bg-white text-indigo-600 shadow-sm transition-all duration-300 flex items-center gap-2";
+        btnErrors.querySelector('i').className = "fa-solid fa-chart-bar text-indigo-500";
+        subTitle.innerText = "ระบบแสดงยอดผิดและอนุมัติ (ภาพรวมพนักงานทั้งหมด)";
+        
+        filterTempContainer.classList.add('hidden');
+        filterQcContainer.classList.add('hidden');
+        kpiTemp.classList.add('hidden');
+        kpiQc.classList.add('hidden');
+        qcTableSwitcher.classList.add('hidden');
+        tempColorLegend.classList.add('hidden');
+        if(matrixTableCard) matrixTableCard.classList.add('hidden'); // ซ่อนตารางในโหมดนี้เนื่องจากเน้นดูกราฟทุกคน
+
+        chartsTemp.classList.add('hidden');
+        chartsQc.classList.add('hidden');
+        chartsErrors.classList.remove('hidden');
+    }
+    handleMonthChange();
+}
 
         function switchQcTableView(viewMode) {
             currentQcTableView = viewMode;
@@ -478,25 +527,29 @@
         }
 
         function handleMonthChange() {
-            const selectedMonthKey = document.getElementById('monthSelect').value;
-            if (!selectedMonthKey) return;
-            const [year, month] = selectedMonthKey.split('/');
+    const selectedMonthKey = document.getElementById('monthSelect').value;
+    if (!selectedMonthKey) return;
+    const [year, month] = selectedMonthKey.split('/');
 
-            if (currentMode === 'temp') {
-                const rawTemp = apiResponseData.tempData || [];
-                currentMonthData = rawTemp.filter(d => d.year === year && d.month === month);
-                const daysSet = new Set();
-                currentMonthData.forEach(item => { if (item.daily) Object.keys(item.daily).forEach(k => daysSet.add(k)); });
-                currentDaysList = Array.from(daysSet);
-                populateNicknameDropdown();
-                handleFilterChange();
-            } else {
-                const rawQc = apiResponseData.qcData || [];
-                const monthQcObj = rawQc.find(d => d.year === year && d.month === month);
-                populateQcTopicDropdown(monthQcObj);
-                renderQcDashboard(monthQcObj);
-            }
-        }
+    if (currentMode === 'temp') {
+        const rawTemp = apiResponseData.tempData || [];
+        currentMonthData = rawTemp.filter(d => d.year === year && d.month === month);
+        const daysSet = new Set();
+        currentMonthData.forEach(item => { if (item.daily) Object.keys(item.daily).forEach(k => daysSet.add(k)); });
+        currentDaysList = Array.from(daysSet);
+        populateNicknameDropdown();
+        handleFilterChange();
+    } else if (currentMode === 'qc') {
+        const rawQc = apiResponseData.qcData || [];
+        const monthQcObj = rawQc.find(d => d.year === year && d.month === month);
+        populateQcTopicDropdown(monthQcObj);
+        renderQcDashboard(monthQcObj);
+    } else if (currentMode === 'errors') { // เพิ่มเงื่อนไขนี้
+        const rawTemp = apiResponseData.tempData || [];
+        currentMonthData = rawTemp.filter(d => d.year === year && d.month === month);
+        renderErrorsApprovalsDashboard();
+    }
+}
 
         function populateNicknameDropdown() {
             const select = document.getElementById('nicknameSelect');
@@ -764,13 +817,23 @@
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12, usePointStyle: true, font: { family: 'Prompt', size: 11, weight: '600' } } } },
+                    plugins: {
+                        legend: { display: true, position: 'top', labels: { boxWidth: 12, usePointStyle: true, font: { family: 'Prompt', size: 11, weight: '600' } } },
+                        datalabels: {
+                            display: true,
+                            align: 'top',
+                            color: '#475569',
+                            font: { family: 'Prompt', size: 9 },
+                            formatter: (val) => val > 0 ? val.toLocaleString() : ''
+                        }
+                    },
                     scales: {
                         y: { type: 'linear', display: true, position: 'left', beginAtZero: true, grid: { color: '#f1f5f9' } },
                         y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } },
                         x: { grid: { display: false } }
                     }
-                }
+                },
+                plugins: [ChartDataLabels]
             });
 
             // จัดอันดับ Top 10 จาก "ค่าเฉลี่ยต่อวัน" สูงสุด พร้อมเทียบเดือนก่อนหน้า
@@ -809,6 +872,13 @@
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     plugins: { 
                         legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'right',
+                            color: '#475569',
+                            font: { family: 'Prompt', size: 10, weight: 'bold' },
+                            formatter: (val) => val > 0 ? val.toLocaleString() : ''
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
@@ -818,7 +888,8 @@
                         }
                     },
                     scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
-                }
+                },
+                plugins: [ChartDataLabels]
             });
 
             // จัดอันดับ Top 10 ยอดผิดสะสม (คงเดิมตามระบบ)
@@ -852,11 +923,118 @@
                 },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
+                    plugins: { 
+                        legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'right',
+                            color: '#475569',
+                            font: { family: 'Prompt', size: 10, weight: 'bold' },
+                            formatter: (val) => val > 0 ? val.toLocaleString() : ''
+                        }
+                    },
                     scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
-                }
+                },
+                plugins: [ChartDataLabels]
             });
+        } // <--- เพิ่มปีกกาปิดของฟังก์ชัน updateTempCharts() ตรงนี้ครับ
+
+function renderErrorsApprovalsDashboard() {
+    const allStaffVol = [...currentMonthData].map(item => ({ ...item, avgDaily: calcAvgDaily(item) })).sort((a, b) => b.avgDaily - a.avgDaily);
+    const allStaffErr = currentMonthData.map(item => {
+        let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
+        return { ...item, totalErrors: errSum };
+    }).sort((a, b) => b.totalErrors - a.totalErrors);
+
+    // ปรับความสูงของกล่องกราฟตามจำนวนพนักงานอัตโนมัติ (เพื่อให้แสดงผลครบทุกคนไม่เบียดกัน)
+    const staffCount = currentMonthData.length || 1;
+    const dynamicHeight = Math.max(500, staffCount * 32) + 'px';
+    document.getElementById('allVolChartWrapper').style.height = dynamicHeight;
+    document.getElementById('allErrChartWrapper').style.height = dynamicHeight;
+
+    const selectedMonthKey = document.getElementById('monthSelect').value;
+    const [curYear, curMonth] = selectedMonthKey ? selectedMonthKey.split('/') : [2026, 11];
+
+    const volLabels = allStaffVol.map(r => {
+        const nick = r.nickName || r.fullName;
+        const curRank = allStaffVol.findIndex(item => item.fullName === r.fullName) + 1;
+        const prev = getPrevMonthRankAndScore(curYear, curMonth, r.fullName, 'volume');
+        if (prev.rank !== null) {
+            if (curRank < prev.rank) return `${nick} (↑เดิม ${prev.rank})`;
+            else if (curRank > prev.rank) return `${nick} (↓เดิม ${prev.rank})`;
         }
+        return nick;
+    });
+
+    const errLabels = allStaffErr.map(r => {
+        const nick = r.nickName || r.fullName;
+        const curRankErr = allStaffErr.findIndex(item => item.fullName === r.fullName) + 1;
+        const prevErr = getPrevMonthRankAndScore(curYear, curMonth, r.fullName, 'error');
+        if (prevErr.rank !== null) {
+            if (curRankErr < prevErr.rank) return `${nick} (↑เดิม ${prevErr.rank})`;
+            else if (curRankErr > prevErr.rank) return `${nick} (↓เดิม ${prevErr.rank})`;
+        }
+        return nick;
+    });
+
+    // กราฟอันดับค่าเฉลี่ยผลงานต่อวัน (ทุกคน)
+    const ctxAllVol = document.getElementById('allStaffVolumeChart').getContext('2d');
+    if (allStaffVolChartInstance) allStaffVolChartInstance.destroy();
+    allStaffVolChartInstance = new Chart(ctxAllVol, {
+        type: 'bar',
+        data: {
+            labels: volLabels,
+            datasets: [{ label: 'เฉลี่ยผลงานต่อวัน', data: allStaffVol.map(r => Number(r.avgDaily.toFixed(1))), backgroundColor: '#6366f1', borderRadius: 6 }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { 
+                legend: { display: false },
+                datalabels: {
+                    anchor: 'end',
+                    align: 'right',
+                    color: '#475569',
+                    font: { family: 'Prompt', size: 10, weight: 'bold' },
+                    formatter: (val) => val.toLocaleString()
+                }
+            },
+            scales: { 
+                x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, 
+                y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } 
+            }
+        },
+        plugins: [ChartDataLabels]
+    });
+
+    // กราฟอันดับยอดผิดสะสมรายบุคคล (ทุกคน)
+    const ctxAllErr = document.getElementById('allStaffErrorChart').getContext('2d');
+    if (allStaffErrorChartInstance) allStaffErrorChartInstance.destroy();
+    allStaffErrorChartInstance = new Chart(ctxAllErr, {
+        type: 'bar',
+        data: {
+            labels: errLabels,
+            datasets: [{ label: 'ยอดผิดสะสม', data: allStaffErr.map(r => r.totalErrors || 0), backgroundColor: '#e11d48', borderRadius: 6 }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { 
+                legend: { display: false },
+                datalabels: {
+                    anchor: 'end',
+                    align: 'right',
+                    color: '#475569',
+                    font: { family: 'Prompt', size: 10, weight: 'bold' },
+                    formatter: (val) => val.toLocaleString()
+                }
+            },
+            scales: { 
+                x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, 
+                y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } 
+            }
+        },
+        plugins: [ChartDataLabels]
+    });
+}
 
         function renderTempTable() {
             document.getElementById('tableTitle').innerText = "ตารางรายละเอียดผลงานรายวัน (พร้อมยอดผิด - น้อง Temp)";
