@@ -421,8 +421,8 @@
         kpiTemp.classList.add('hidden');
         kpiQc.classList.add('hidden');
         qcTableSwitcher.classList.add('hidden');
-        tempColorLegend.classList.add('hidden');
-        if(matrixTableCard) matrixTableCard.classList.add('hidden'); // ซ่อนตารางในโหมดนี้เนื่องจากเน้นดูกราฟทุกคน
+        tempColorLegend.classList.remove('hidden');
+        if(matrixTableCard) matrixTableCard.classList.remove('hidden');
 
         chartsTemp.classList.add('hidden');
         chartsQc.classList.add('hidden');
@@ -544,10 +544,15 @@
         const monthQcObj = rawQc.find(d => d.year === year && d.month === month);
         populateQcTopicDropdown(monthQcObj);
         renderQcDashboard(monthQcObj);
-    } else if (currentMode === 'errors') { // เพิ่มเงื่อนไขนี้
+    } else if (currentMode === 'errors') {
         const rawTemp = apiResponseData.tempData || [];
         currentMonthData = rawTemp.filter(d => d.year === year && d.month === month);
+        const daysSet = new Set();
+        currentMonthData.forEach(item => { if (item.daily) Object.keys(item.daily).forEach(k => daysSet.add(k)); });
+        currentDaysList = Array.from(daysSet);
+        filteredData = [...currentMonthData];
         renderErrorsApprovalsDashboard();
+        renderTempTable();
     }
 }
 
@@ -887,7 +892,7 @@
                             }
                         }
                     },
-                    scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
+                    scales: { x: { beginAtZero: true, grace: '15%', grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
                 },
                 plugins: [ChartDataLabels]
             });
@@ -933,24 +938,39 @@
                             formatter: (val) => val > 0 ? val.toLocaleString() : ''
                         }
                     },
-                    scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
+                    scales: { x: { beginAtZero: true, grace: '15%', grid: { color: '#f1f5f9' } }, y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } }
                 },
                 plugins: [ChartDataLabels]
             });
         } // <--- เพิ่มปีกกาปิดของฟังก์ชัน updateTempCharts() ตรงนี้ครับ
 
 function renderErrorsApprovalsDashboard() {
-    const allStaffVol = [...currentMonthData].map(item => ({ ...item, avgDaily: calcAvgDaily(item) })).sort((a, b) => b.avgDaily - a.avgDaily);
-    const allStaffErr = currentMonthData.map(item => {
-        let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
-        return { ...item, totalErrors: errSum };
-    }).sort((a, b) => b.totalErrors - a.totalErrors);
+    const isExcludedName = (item) => {
+        const nick = (item.nickName || '').trim();
+        const full = (item.fullName || '').trim();
+        return nick === 'นาย เอ็มเอลพีอาร์ รายวัน' || full === 'นาย เอ็มเอลพีอาร์ รายวัน';
+    };
 
-    // ปรับความสูงของกล่องกราฟตามจำนวนพนักงานอัตโนมัติ (เพื่อให้แสดงผลครบทุกคนไม่เบียดกัน)
-    const staffCount = currentMonthData.length || 1;
-    const dynamicHeight = Math.max(500, staffCount * 32) + 'px';
-    document.getElementById('allVolChartWrapper').style.height = dynamicHeight;
-    document.getElementById('allErrChartWrapper').style.height = dynamicHeight;
+    const allStaffVol = [...currentMonthData]
+        .filter(item => !isExcludedName(item))
+        .map(item => ({ ...item, avgDaily: calcAvgDaily(item) }))
+        .filter(item => item.avgDaily > 0)
+        .sort((a, b) => b.avgDaily - a.avgDaily);
+
+    const allStaffErr = [...currentMonthData]
+        .filter(item => !isExcludedName(item))
+        .map(item => {
+            let errSum = 0; if (item.dailyErrors) Object.values(item.dailyErrors).forEach(e => errSum += e);
+            return { ...item, totalErrors: errSum };
+        })
+        .filter(item => item.totalErrors > 0)
+        .sort((a, b) => b.totalErrors - a.totalErrors);
+
+    // ปรับความสูงของกล่องกราฟตามจำนวนรายชื่อที่มียอดในแต่ละกราฟ
+    const volHeight = Math.max(320, allStaffVol.length * 32) + 'px';
+    const errHeight = Math.max(320, allStaffErr.length * 32) + 'px';
+    document.getElementById('allVolChartWrapper').style.height = volHeight;
+    document.getElementById('allErrChartWrapper').style.height = errHeight;
 
     const selectedMonthKey = document.getElementById('monthSelect').value;
     const [curYear, curMonth] = selectedMonthKey ? selectedMonthKey.split('/') : [2026, 11];
@@ -977,7 +997,7 @@ function renderErrorsApprovalsDashboard() {
         return nick;
     });
 
-    // กราฟอันดับค่าเฉลี่ยผลงานต่อวัน (ทุกคน)
+    // กราฟอันดับค่าเฉลี่ยผลงานต่อวัน (เฉพาะคนที่มีผลงาน > 0 และไม่รวม นาย เอ็มเอลพีอาร์ รายวัน)
     const ctxAllVol = document.getElementById('allStaffVolumeChart').getContext('2d');
     if (allStaffVolChartInstance) allStaffVolChartInstance.destroy();
     allStaffVolChartInstance = new Chart(ctxAllVol, {
@@ -999,14 +1019,14 @@ function renderErrorsApprovalsDashboard() {
                 }
             },
             scales: { 
-                x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, 
+                x: { beginAtZero: true, grace: '15%', grid: { color: '#f1f5f9' } }, 
                 y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } 
             }
         },
         plugins: [ChartDataLabels]
     });
 
-    // กราฟอันดับยอดผิดสะสมรายบุคคล (ทุกคน)
+    // กราฟอันดับยอดผิดสะสมรายบุคคล (เฉพาะคนที่มีประวัติผิด > 0 และไม่รวม นาย เอ็มเอลพีอาร์ รายวัน)
     const ctxAllErr = document.getElementById('allStaffErrorChart').getContext('2d');
     if (allStaffErrorChartInstance) allStaffErrorChartInstance.destroy();
     allStaffErrorChartInstance = new Chart(ctxAllErr, {
@@ -1028,7 +1048,7 @@ function renderErrorsApprovalsDashboard() {
                 }
             },
             scales: { 
-                x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, 
+                x: { beginAtZero: true, grace: '15%', grid: { color: '#f1f5f9' } }, 
                 y: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } } 
             }
         },
@@ -1325,9 +1345,19 @@ function renderErrorsApprovalsDashboard() {
                 },
                 options: { 
                     responsive: true, maintainAspectRatio: false, 
-                    plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12, usePointStyle: true, font: { family: 'Prompt', size: 11, weight: '600' } } } }, 
+                    plugins: { 
+                        legend: { display: true, position: 'top', labels: { boxWidth: 12, usePointStyle: true, font: { family: 'Prompt', size: 11, weight: '600' } } },
+                        datalabels: {
+                            display: true,
+                            align: 'top',
+                            color: '#475569',
+                            font: { family: 'Prompt', size: 9 },
+                            formatter: (val) => val > 0 ? val.toLocaleString() : ''
+                        }
+                    }, 
                     scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } } 
-                }
+                },
+                plugins: [ChartDataLabels]
             });
 
             const reasonsList = qcObj.reasons || [];
@@ -1351,9 +1381,19 @@ function renderErrorsApprovalsDashboard() {
                 },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: { x: { beginAtZero: true, grid: { color: '#f1f5f9' } }, y: { grid: { display: false } } }
-                }
+                    plugins: { 
+                        legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'right',
+                            color: '#475569',
+                            font: { family: 'Prompt', size: 10, weight: 'bold' },
+                            formatter: (val) => val > 0 ? val.toLocaleString() : ''
+                        }
+                    },
+                    scales: { x: { beginAtZero: true, grace: '15%', grid: { color: '#f1f5f9' } }, y: { grid: { display: false } } }
+                },
+                plugins: [ChartDataLabels]
             });
 
             // 5. กราฟล่างขวา: เปอร์เซ็นต์การอนุมัติถูกรายหัวข้อ (%)
@@ -1390,6 +1430,13 @@ function renderErrorsApprovalsDashboard() {
                     responsive: true, maintainAspectRatio: false,
                     plugins: { 
                         legend: { display: false },
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            color: '#475569',
+                            font: { family: 'Prompt', size: 10, weight: 'bold' },
+                            formatter: (val) => val > 0 ? val + '%' : ''
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
@@ -1401,11 +1448,12 @@ function renderErrorsApprovalsDashboard() {
                     scales: { 
                         x: { grid: { display: false }, ticks: { font: { family: 'Prompt', size: 10 } } }, 
                         y: { 
-                            beginAtZero: true, max: 100,
+                            beginAtZero: true, suggestedMax: 112,
                             ticks: { callback: function(value) { return value + '%'; } }
                         } 
                     }
-                }
+                },
+                plugins: [ChartDataLabels]
             });
         }
     </script>
